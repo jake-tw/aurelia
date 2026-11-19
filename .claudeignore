@@ -1,0 +1,47 @@
+# Claude Code 忽略文件
+# AI 不應該把這些當成普通文檔讀取
+
+# 人看的文件入口
+README.md
+
+# Skills 定義文件
+docs/skills/
+
+# 實驗記錄（歸檔用，不需要 AI 讀取）
+experiments/
+
+# Node modules
+node_modules/
+
+# 構建產物
+dist/
+build/
+.next/
+.nuxt/
+
+# 測試覆蓋率
+coverage/
+.nyc_output/
+
+# 日誌
+*.log
+logs/
+
+# 臨時文件
+.scratch/
+tmp/
+temp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 環境變量
+.env
+.env.local
+.env.*.local
+
+# 其他資源
+mcp/
