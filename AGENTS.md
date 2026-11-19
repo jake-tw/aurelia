@@ -16,7 +16,7 @@ Issues 以 Markdown 文件形式存放在 `.scratch/` 下：feature 放 `.scratc
 
 ### Architecture
 
-系統整體架構、模塊設計、技術棧選擇見根目錄 `ARCHITECTURE.md`。
+系統整體架構、模塊設計、技術棧選擇見 `docs/ARCHITECTURE.md`。
 
 ### Domain docs
 
