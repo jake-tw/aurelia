@@ -1,0 +1,254 @@
+# MCP Toolbox 設定：MySQL / Redis
+# 下列以 dollar-brace 包住變數名的值，由 toolbox 啟動時從環境變數替換（compose 透過 env_file 注入 .env）
+# 多個資源以 --- 分隔。請依實際資料表 / collection 調整 tools。
+
+kind: source
+name: test-mysql
+type: mysql
+host: ${MYSQL_HOST}
+port: ${MYSQL_PORT}
+database: ${MYSQL_DB}
+user: ${MYSQL_USER}
+password: ${MYSQL_PASS}
+queryTimeout: 30s
+---
+kind: source
+name: test-redis
+type: redis
+# 節點數需與 .env 的 REDIS_ADDR_* 一致；單機請只留一行並移除 clusterEnabled
+address:
+  - ${REDIS_ADDR_1}
+  - ${REDIS_ADDR_2}
+  - ${REDIS_ADDR_3}
+  - ${REDIS_ADDR_4}
+  - ${REDIS_ADDR_5}
+  - ${REDIS_ADDR_6}
+password: ${REDIS_PASS}
+# Redis Cluster 模式不支援 database 欄位
+clusterEnabled: true
+---
+# ---- MySQL tools ----
+# mysql-execute-sql 可執行任意 SQL，工具本身沒有唯讀保護，
+# 務必搭配唯讀資料庫帳號（見 sql/create-readonly-user.sql）。
+kind: tool
+name: mysql_execute_sql
+type: mysql-execute-sql
+source: test-mysql
+description: 在測試資料庫執行 SQL 查詢。僅用於查詢（SELECT），帳號為唯讀。
+---
+kind: tool
+name: mysql_list_tables
+type: mysql-list-tables
+source: test-mysql
+description: 列出資料庫的資料表與欄位結構。
+---
+# ---- Redis tools ----
+kind: tool
+name: redis_get
+type: redis
+source: test-redis
+description: 以 key 讀取 Redis 字串值。
+commands:
+  - [GET, $key]
+parameters:
+  - name: key
+    type: string
+    description: Redis key 名稱。
+---
+kind: tool
+name: redis_keys
+type: redis
+source: test-redis
+description: 列出符合 pattern 的所有 keys（注意：在大型資料庫中慎用）。
+commands:
+  - [KEYS, $pattern]
+parameters:
+  - name: pattern
+    type: string
+    description: Key 的 pattern，例如 "user:*" 或 "*"。
+---
+kind: tool
+name: redis_scan
+type: redis
+source: test-redis
+description: 以游標方式掃描 keys（適合大型資料庫）。
+commands:
+  - [SCAN, $cursor, MATCH, $pattern, COUNT, $count]
+parameters:
+  - name: cursor
+    type: string
+    description: 游標位置，首次使用 "0"。
+  - name: pattern
+    type: string
+    description: Key 的 pattern，例如 "user:*"。
+  - name: count
+    type: string
+    description: 每次掃描的建議數量，例如 "100"。
+---
+kind: tool
+name: redis_exists
+type: redis
+source: test-redis
+description: 檢查 key 是否存在。
+commands:
+  - [EXISTS, $key]
+parameters:
+  - name: key
+    type: string
+    description: Redis key 名稱。
+---
+kind: tool
+name: redis_ttl
+type: redis
+source: test-redis
+description: 取得 key 的剩餘過期時間（秒）。
+commands:
+  - [TTL, $key]
+parameters:
+  - name: key
+    type: string
+    description: Redis key 名稱。
+---
+kind: tool
+name: redis_hget
+type: redis
+source: test-redis
+description: 讀取 hash 中的欄位值。
+commands:
+  - [HGET, $key, $field]
+parameters:
+  - name: key
+    type: string
+    description: Hash key 名稱。
+  - name: field
+    type: string
+    description: Hash 欄位名稱。
+---
+kind: tool
+name: redis_hgetall
+type: redis
+source: test-redis
+description: 讀取 hash 的所有欄位與值。
+commands:
+  - [HGETALL, $key]
+parameters:
+  - name: key
+    type: string
+    description: Hash key 名稱。
+---
+kind: tool
+name: redis_smembers
+type: redis
+source: test-redis
+description: 取得 set 的所有成員。
+commands:
+  - [SMEMBERS, $key]
+parameters:
+  - name: key
+    type: string
+    description: Set key 名稱。
+---
+kind: tool
+name: redis_scard
+type: redis
+source: test-redis
+description: 取得 set 的成員數量。
+commands:
+  - [SCARD, $key]
+parameters:
+  - name: key
+    type: string
+    description: Set key 名稱。
+---
+kind: tool
+name: redis_lrange
+type: redis
+source: test-redis
+description: 取得 list 指定範圍的元素。
+commands:
+  - [LRANGE, $key, $start, $stop]
+parameters:
+  - name: key
+    type: string
+    description: List key 名稱。
+  - name: start
+    type: string
+    description: 起始索引。
+  - name: stop
+    type: string
+    description: 結束索引（-1 表示到最後）。
+---
+kind: tool
+name: redis_llen
+type: redis
+source: test-redis
+description: 取得 list 的長度。
+commands:
+  - [LLEN, $key]
+parameters:
+  - name: key
+    type: string
+    description: List key 名稱。
+---
+kind: tool
+name: redis_zrange
+type: redis
+source: test-redis
+description: 取得 sorted set 指定範圍的成員（按分數排序）。
+commands:
+  - [ZRANGE, $key, $start, $stop, WITHSCORES]
+parameters:
+  - name: key
+    type: string
+    description: Sorted set key 名稱。
+  - name: start
+    type: string
+    description: 起始索引。
+  - name: stop
+    type: string
+    description: 結束索引（-1 表示到最後）。
+---
+kind: tool
+name: redis_zcard
+type: redis
+source: test-redis
+description: 取得 sorted set 的成員數量。
+commands:
+  - [ZCARD, $key]
+parameters:
+  - name: key
+    type: string
+    description: Sorted set key 名稱。
+---
+kind: tool
+name: redis_type
+type: redis
+source: test-redis
+description: 取得 key 的資料型別。
+commands:
+  - [TYPE, $key]
+parameters:
+  - name: key
+    type: string
+    description: Redis key 名稱。
+---
+kind: toolset
+name: query-tools
+tools:
+  - mysql_execute_sql
+  - mysql_list_tables
+  - redis_get
+  - redis_keys
+  - redis_scan
+  - redis_exists
+  - redis_ttl
+  - redis_hget
+  - redis_hgetall
+  - redis_smembers
+  - redis_scard
+  - redis_lrange
+  - redis_llen
+  - redis_zrange
+  - redis_zcard
+  - redis_type
+---

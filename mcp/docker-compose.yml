@@ -1,0 +1,15 @@
+services:
+  toolbox:
+    image: us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:${TOOLBOX_VERSION}
+    container_name: mcp-toolbox
+    # host network：容器共用主機網路，可直接連本機資料庫
+    # 監聽 0.0.0.0，安全性由外部 Nginx 白名單控制
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./tools.yaml:/app/tools.yaml:ro
+    command:
+      - --config=/app/tools.yaml
+      - --address=${TOOLBOX_ADDRESS}
+      - --port=${TOOLBOX_PORT}

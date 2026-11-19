@@ -1,0 +1,48 @@
+# Nginx 反向代理配置：為 MCP Toolbox 提供反向代理
+# 認證方式：IP 白名單 + Authorization header 驗證
+
+# 上游 toolbox 服務
+upstream mcp_toolbox {
+    server 127.0.0.1:19500;
+}
+
+# Authorization header 驗證映射
+# 將允許的 token 列在此處，格式：Bearer <token>
+map $http_authorization $mcp_auth_valid {
+    default             0;
+    "Bearer <token>"    1; # 替換為真實 token
+}
+
+server {
+
+    # MCP 端點
+    location /mcp/ {
+        # 必須限制白名單訪問
+        include ip_whitelist.conf;
+        deny all;
+
+        # Authorization header 驗證
+        if ($mcp_auth_valid = 0) {
+            add_header Content-Type application/json always;
+            return 401 '{"error": "Unauthorized", "message": "Invalid or missing Authorization header"}';
+        }
+
+        # 反向代理到 toolbox
+        proxy_pass http://mcp_toolbox;
+        proxy_http_version 1.1;
+
+        # 保留原始請求資訊
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeout 設定
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 60s;
+
+        # 禁用緩衝（對 SSE/streaming 更友善）
+        proxy_buffering off;
+    }
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "company-mcp-server": {
+      "type": "http",
+      "url": "http://127.0.0.1:19500/mcp/query-tools",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
+    }
+  }
+}
