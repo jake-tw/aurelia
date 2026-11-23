@@ -1,46 +1,53 @@
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Telegraf } from 'telegraf';
+import { message } from 'telegraf/filters';
 import { BotService } from './bot.service.js';
 
 /**
- * Bot 訊息處理入口
+ * Bot 訊息入口
  *
- * 注意：這個檔案需要安裝 nestjs-telegraf 後才能使用
- * npm install nestjs-telegraf telegraf
- *
- * 使用方式：
- * @Update()
- * export class BotUpdate {
- *   @Start()
- *   async onStart(@Ctx() ctx: Context) { ... }
- * }
+ * 只從 ctx 取出原始值交給 BotService，不放業務邏輯。
+ * handler 在 onModuleInit 註冊，早於 polling 開始（onApplicationBootstrap）。
  */
-
-export class BotUpdate {
+@Injectable()
+export class BotUpdate implements OnModuleInit {
   private readonly logger = new Logger(BotUpdate.name);
 
-  constructor(private botService: BotService) {}
+  constructor(
+    private readonly bot: Telegraf,
+    private readonly botService: BotService,
+  ) {}
 
-  // TODO: 安裝 nestjs-telegraf 後解除註解
+  onModuleInit(): void {
+    this.bot.start((ctx) =>
+      this.botService.handleStart(ctx.chat.id, ctx.from?.username),
+    );
+    this.bot.command('help', (ctx) => this.botService.handleHelp(ctx.chat.id));
+    this.bot.command('status', (ctx) =>
+      this.botService.handleStatus(ctx.chat.id),
+    );
 
-  // @Start()
-  // async onStart(@Ctx() ctx: Context) {
-  //   const userId = ctx.from.id;
-  //   const username = ctx.from.username;
-  //   await this.botService.handleStart(userId, username);
-  // }
+    // 指令 handler 已先註冊，命中的指令不會走到這裡
+    this.bot.on(message('text'), (ctx) => {
+      // 未知指令（例如 /foo）不 echo
+      if (ctx.message.entities?.some((e) => e.type === 'bot_command' && e.offset === 0)) {
+        return;
+      }
 
-  // @Command('help')
-  // async onHelp(@Ctx() ctx: Context) {
-  //   await this.botService.handleHelp(ctx.from.id);
-  // }
+      const chatId = ctx.chat.id;
+      const chatType: string = ctx.chat.type;
+      const text = ctx.message.text;
 
-  // @Command('status')
-  // async onStatus(@Ctx() ctx: Context) {
-  //   await this.botService.handleStatus(ctx.from.id);
-  // }
-
-  // @On('text')
-  // async onText(@Ctx() ctx: Context, @Message('text') text: string) {
-  //   await this.botService.handleTextMessage(ctx.from.id, text);
-  // }
+      switch (chatType) {
+        case 'private':
+          return this.botService.handlePrivateText(chatId, text);
+        case 'group':
+        case 'supergroup':
+          return this.botService.handleGroupText(chatId, text);
+        default:
+          // channel 等其他類型忽略
+          this.logger.debug(`Ignored message from ${chatType} chat ${chatId}`);
+      }
+    });
+  }
 }

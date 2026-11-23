@@ -14,8 +14,8 @@ src/
 ├── modules/                         # 🔵 業務邏輯層（頂層）
 │   └── bot/                         # Telegram Bot 業務邏輯
 │       ├── bot.module.ts            # Bot 模組定義
-│       ├── bot.service.ts           # Bot 業務邏輯（處理指令）
-│       └── bot.update.ts            # Bot 訊息入口（接收處理）
+│       ├── bot.service.ts           # Bot 業務邏輯（處理指令與文字訊息）
+│       └── bot.update.ts            # Bot 訊息入口（註冊 handler、依聊天類型分流）
 │
 ├── integrations/                    # 🟢 外部服務整合層（中層）
 │   └── telegram/                    # Telegram API 封裝
@@ -23,6 +23,9 @@ src/
 │       └── telegram.service.ts      # Telegram API（發送訊息）
 │
 ├── infrastructure/                  # 🟡 基礎設施層（底層）
+│   ├── telegraf/                    # Telegraf 實例與生命週期
+│   │   ├── telegraf.module.ts       # 提供唯一的 Telegraf 實例
+│   │   └── telegraf.lifecycle.ts    # 啟動（polling）與關閉
 │   └── database/                    # 資料庫連接
 │       ├── database.module.ts       # 資料庫模組
 │       └── database.service.ts      # 資料庫操作
@@ -190,30 +193,45 @@ export async function delay(ms: number): Promise<void> {
 1. **接收訊息**（入口 - 頂層）- 處理用戶指令
 2. **發送訊息**（工具 - 底層）- 被其他模組調用
 
-### 解決方案：拆分成兩個模組
+### 解決方案：拆成三個模組，共用同一個 Telegraf 實例
+
+本專案直接使用原生 `telegraf`，不使用 `nestjs-telegraf`（原因見 [ADR-0001](./adr/0001-self-managed-telegraf.md)）。
 
 ```
-integrations/telegram/          # 底層：API 封裝
+infrastructure/telegraf/        # 底層：持有唯一的 Telegraf 實例
+├── telegraf.module.ts          # 以 Telegraf 類別為 token 提供實例
+└── telegraf.lifecycle.ts       # getMe() 驗證 token → launch() → stop()
+
+integrations/telegram/          # 中層：API 封裝
 ├── telegram.module.ts
 └── telegram.service.ts         # sendMessage(), sendPhoto()
 
 modules/bot/                    # 頂層：業務邏輯
 ├── bot.module.ts
 ├── bot.service.ts              # 處理業務邏輯
-└── bot.update.ts               # 接收訊息入口
+└── bot.update.ts               # 註冊 handler，從 ctx 取值後交給 BotService
 ```
 
 **依賴關係：**
 ```
 BotUpdate → BotService → TelegramService
-(入口)      (業務邏輯)    (API 封裝)
+   ↓                          ↓
+   └────→ Telegraf ←──────────┘   (infrastructure/telegraf)
 ```
+
+**生命週期：**
+1. `onModuleInit`：`BotUpdate` 向 `Telegraf` 註冊 handler。
+2. `onApplicationBootstrap`：`TelegrafLifecycle` 先呼叫 `getMe()`。token 無效時應用程式啟動失敗，成功才 `launch()` 開始 long polling。
+3. `onApplicationShutdown`：呼叫 `bot.stop(signal)`。`main.ts` 需要 `enableShutdownHooks()`，否則收不到 SIGINT/SIGTERM。
 
 **優點：**
 - ✅ 避免循環依賴
 - ✅ 職責清晰分離
 - ✅ TelegramService 可被其他模組安全使用
 - ✅ Bot 業務邏輯集中在 modules/bot/
+- ✅ 不受 `nestjs-telegraf` 的 NestJS 版本宣告限制
+
+**聊天類型分流：** `BotUpdate` 依 `ctx.chat.type` 分流文字訊息。`private` 走 `handlePrivateText`，`group` 與 `supergroup` 走 `handleGroupText`，其他類型忽略。`/start`、`/help`、`/status` 不分流。群組預設的 privacy mode 下 bot 只收得到指令和 @ 提及，要收一般文字需在 BotFather 用 `/setprivacy` 關閉。
 
 ---
 
@@ -286,7 +304,7 @@ const short = truncate('Long text', 10);
 ```
 1. Telegram 發送訊息
    ↓
-2. BotUpdate 接收 (@On('text'))
+2. BotUpdate 接收 (bot.on(message('text')))
    ↓
 3. BotService.handleTextMessage()
    ├─→ DatabaseService.getUserHistory()    # 基礎設施層
@@ -298,20 +316,23 @@ const short = truncate('Long text', 10);
 **代碼：**
 ```typescript
 // modules/bot/bot.update.ts
-@Update()
-export class BotUpdate {
-  @On('text')
-  async onText(@Message('text') text: string, @Ctx() ctx: Context) {
-    await this.botService.handleTextMessage(ctx.from.id, text);
+@Injectable()
+export class BotUpdate implements OnModuleInit {
+  constructor(private bot: Telegraf, private botService: BotService) {}
+
+  onModuleInit() {
+    this.bot.on(message('text'), (ctx) =>
+      this.botService.handlePrivateText(ctx.chat.id, ctx.message.text),
+    );
   }
 }
 
 // modules/bot/bot.service.ts
-async handleTextMessage(userId: number, text: string) {
-  const history = await this.databaseService.getUserHistory(userId);
+async handlePrivateText(chatId: number, text: string) {
+  const history = await this.databaseService.getUserHistory(chatId);
   const response = await this.aiService.chat(text, history);
-  await this.databaseService.saveMessage(userId, text, response);
-  await this.telegramService.sendMessage(userId, response);
+  await this.databaseService.saveMessage(chatId, text, response);
+  await this.telegramService.sendMessage(chatId, response);
 }
 ```
 

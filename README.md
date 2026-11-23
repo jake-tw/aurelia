@@ -12,11 +12,12 @@ src/
 ├── app.service.ts               # 根服務
 │
 ├── modules/                     # 業務邏輯層
-│   ├── telegram/                # Telegram Bot 業務邏輯
+│   ├── bot/                     # Telegram Bot 業務邏輯
 │   ├── admin/                   # 管理後台
 │   └── tasks/                   # 任務編排
 │
 ├── infrastructure/              # 基礎設施層
+│   ├── telegraf/                # Telegraf 實例與生命週期
 │   ├── database/                # 資料庫連接
 │   ├── cache/                   # 快取服務
 │   └── queue/                   # 訊息佇列
@@ -126,9 +127,14 @@ npm run start:prod
 ## 📦 主要功能
 
 ### 1. Telegram Bot 整合
-- 接收和發送訊息
-- 指令處理
-- 對話場景管理
+- 使用 long polling 接收訊息，啟動時會先驗證 token
+- 指令處理：`/start`、`/help`、`/status`
+- 文字訊息依聊天類型（私聊、群組）分流，目前都是 echo，用來驗證收發流程
+- 對話場景管理（待實作）
+
+> 群組預設為 privacy mode，Bot 只收得到指令和 @ 提及。要收到群組一般文字，需向 BotFather 執行 `/setprivacy` 並選擇 Disable。
+>
+> 目前沒有存取白名單，知道 Bot 帳號的人都能使用。接上 Shell 或 Claude Code 整合前必須補上，見 ADR-0001。
 
 ### 2. 資料庫操作
 - TypeORM 整合
@@ -255,7 +261,7 @@ npm run test:e2e       # E2E 測試
 - **程式碼檢查**: oxlint
 - **格式化**: Prettier
 - **ORM**: TypeORM (待整合)
-- **Bot**: nestjs-telegraf (待整合)
+- **Bot**: telegraf（原生，不使用 nestjs-telegraf，見 [ADR-0001](./docs/adr/0001-self-managed-telegraf.md)）
 - **AI**: @anthropic-ai/sdk (待整合)
 
 ## 🔗 相關文檔
@@ -264,3 +270,5 @@ npm run test:e2e       # E2E 測試
 - [NestJS LLM 文檔](https://docs.nestjs.com/llms.txt)
 - [專案 Agent 指令](./AGENTS.md)
 - [NestJS Framework 指南](./docs/agents/nestjs.md)
+- [架構說明](./docs/ARCHITECTURE.md)
+- [ADR-0001：直接使用原生 telegraf](./docs/adr/0001-self-managed-telegraf.md)
