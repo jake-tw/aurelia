@@ -69,12 +69,27 @@ common/ (共用工具)
 
 - Node.js >= 18
 - npm >= 9
-- MySQL >= 8.0
+- MySQL >= 8.0（或使用 Docker）
+- Docker & Docker Compose（如使用 Docker 開發環境）
 
 ### 安裝依賴
 
 ```bash
 npm install
+```
+
+### 初始化開發環境
+
+首次使用時執行初始化腳本：
+
+```bash
+./init.sh
+```
+
+### 啟動資料庫（使用 Docker）
+
+```bash
+docker compose up -d
 ```
 
 ### 配置環境變數

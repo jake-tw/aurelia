@@ -1,0 +1,34 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: aurelia-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: aurelia
+      MYSQL_USER: aurelia
+      MYSQL_PASSWORD: aurelia123
+    ports:
+      - "3306:3306"
+    volumes:
+      # MySQL 資料檔案：持久化儲存在本地家目錄
+      - ~/.aurelia/docker/mysql/data:/var/lib/mysql
+
+      # 初始化腳本：首次啟動時自動執行此目錄下的 .sql 和 .sh 檔案
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+
+    # MySQL 啟動參數
+    # 說明：
+    # - mysql_native_password: 使用傳統驗證方式（相容性較好）
+    # - utf8mb4: 完整的 UTF-8 編碼（支援 emoji 和所有 Unicode 字元）
+    # - utf8mb4_unicode_ci: 不區分大小寫的 Unicode 排序規則
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

@@ -106,14 +106,23 @@ DatabaseService → TelegramService (基礎設施 ❌→ 整合)
 @Injectable()
 export class BotService {
   constructor(
+    @InjectRepository(TelegramLog)
+    private telegramLogRepo: Repository<TelegramLog>,
     private telegramService: TelegramService,  // 使用整合層
-    private databaseService: DatabaseService,  // 使用基礎設施層
   ) {}
 
-  async handleStart(userId: number) {
-    // 業務邏輯編排
-    await this.databaseService.saveUser(userId);
-    await this.telegramService.sendMessage(userId, 'Welcome!');
+  async handleStart(chatId: number, username?: string) {
+    // 記錄訊息
+    await this.telegramLogRepo.save({
+      chatId,
+      content: '/start',
+      direction: 'incoming',
+      username,
+      chatType: 'private',
+    });
+
+    // 發送回覆
+    await this.telegramService.sendMessage(chatId, 'Welcome!');
   }
 }
 ```
@@ -154,17 +163,17 @@ export class TelegramService {
 
 **範例：**
 ```typescript
-// infrastructure/database/database.service.ts
+// infrastructure/database/transaction.service.ts
 @Injectable()
-export class DatabaseService {
-  async query(sql: string) {
-    // 資料庫查詢
+export class TransactionService {
+  async run<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.dataSource.transaction(work);
   }
 }
 ```
 
 **典型模組：**
-- `database/` - 資料庫連接
+- `database/` - Entity 定義、Transaction 管理
 - `cache/` - 快取服務
 - `queue/` - 訊息佇列
 
@@ -232,6 +241,178 @@ BotUpdate → BotService → TelegramService
 - ✅ 不受 `nestjs-telegraf` 的 NestJS 版本宣告限制
 
 **聊天類型分流：** `BotUpdate` 依 `ctx.chat.type` 分流文字訊息。`private` 走 `handlePrivateText`，`group` 與 `supergroup` 走 `handleGroupText`，其他類型忽略。`/start`、`/help`、`/status` 不分流。群組預設的 privacy mode 下 bot 只收得到指令和 @ 提及，要收一般文字需在 BotFather 用 `/setprivacy` 關閉。
+
+---
+
+## 🗄️ 資料庫模組設計
+
+### 分層原則
+
+```
+infrastructure/database/        # 基礎設施層
+├── entities/                   # Entity 定義（共用資源）
+│   ├── telegram-log.entity.ts
+│   ├── user.entity.ts
+│   └── index.ts
+├── database.module.ts          # TypeORM 配置與匯出
+└── transaction.service.ts      # 跨表 Transaction 管理
+
+modules/bot/                    # 業務層
+├── repositories/               # 客製化 Repository（可選）
+│   └── telegram-log.repository.ts
+└── bot.service.ts              # 業務邏輯
+```
+
+### 使用方式
+
+#### 1. 簡單 CRUD - 直接注入 Repository
+
+```typescript
+// modules/bot/bot.service.ts
+@Injectable()
+export class BotService {
+  constructor(
+    @InjectRepository(TelegramLog)
+    private telegramLogRepo: Repository<TelegramLog>,
+  ) {}
+
+  async saveLog(chatId: number, content: string) {
+    return this.telegramLogRepo.save({
+      chatId,
+      content,
+      direction: 'incoming',
+      chatType: 'private',
+    });
+  }
+}
+```
+
+**何時使用：**
+- ✅ 基本的 CRUD 操作
+- ✅ 簡單的 `find()`、`save()`、`remove()`
+
+#### 2. 複雜查詢 - 建立客製化 Repository
+
+```typescript
+// modules/bot/repositories/telegram-log.repository.ts
+@Injectable()
+export class TelegramLogRepository {
+  constructor(
+    @InjectRepository(TelegramLog)
+    private repo: Repository<TelegramLog>,
+  ) {}
+
+  async getStatsGroupedByChatType(chatId: number) {
+    return this.repo
+      .createQueryBuilder('log')
+      .select('log.chatType', 'chatType')
+      .addSelect('COUNT(*)', 'count')
+      .where('log.chatId = :chatId', { chatId })
+      .groupBy('log.chatType')
+      .getRawMany();
+  }
+
+  async findRecentByUser(chatId: number, days: number) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    return this.repo.find({
+      where: {
+        chatId,
+        createdAt: MoreThan(startDate),
+      },
+      order: { createdAt: 'DESC' },
+    });
+  }
+}
+
+// modules/bot/bot.service.ts
+@Injectable()
+export class BotService {
+  constructor(
+    private telegramLogRepo: TelegramLogRepository,  // 注入客製化 Repository
+  ) {}
+
+  async getUserStats(chatId: number) {
+    return this.telegramLogRepo.getStatsGroupedByChatType(chatId);
+  }
+}
+```
+
+**何時使用：**
+- ✅ 複雜的 QueryBuilder 查詢
+- ✅ 多個地方重複使用的查詢邏輯
+- ✅ 需要封裝查詢細節
+
+**放置位置：**
+- 📁 `modules/<業務模組>/repositories/` - 因為是該業務模組特定的查詢邏輯
+
+#### 3. 跨表操作 - 使用 TransactionService
+
+```typescript
+// modules/bot/bot.service.ts
+@Injectable()
+export class BotService {
+  constructor(
+    @InjectRepository(TelegramLog)
+    private telegramLogRepo: Repository<TelegramLog>,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
+    private transactionService: TransactionService,  // 注入 TransactionService
+  ) {}
+
+  async handleFirstTimeUser(chatId: number, username: string) {
+    await this.transactionService.run(async (manager) => {
+      // 在 transaction 內操作多個表
+      const user = await manager.save(User, {
+        chatId,
+        username,
+        createdAt: new Date(),
+      });
+
+      await manager.save(TelegramLog, {
+        chatId,
+        content: '/start',
+        direction: 'incoming',
+        username,
+      });
+
+      await manager.save(UserSettings, {
+        userId: user.id,
+        language: 'zh-TW',
+      });
+    });
+  }
+}
+```
+
+**何時使用：**
+- ✅ 需要同時修改多個表
+- ✅ 必須全部成功或全部失敗（ACID）
+- ✅ 資料一致性要求高的操作
+
+### 決策樹
+
+```
+需要資料庫操作？
+  ├─ 簡單 CRUD（find, save, remove）？
+  │   → @InjectRepository(Entity)
+  │
+  ├─ 複雜查詢（QueryBuilder、統計、聚合）？
+  │   → 建立 Custom Repository（放在業務模組 repositories/）
+  │
+  └─ 跨多個表且需要 Transaction？
+      → 使用 TransactionService（來自 infrastructure/database/）
+```
+
+### 設計原則
+
+1. **Entity 是共用資源**：放在 `infrastructure/database/entities/`
+2. **Repository 不用自己建立**：TypeORM 自動提供
+3. **誰需要誰注入**：用 `@InjectRepository(Entity)` 注入
+4. **業務邏輯在業務層**：不要在 infrastructure 寫業務邏輯
+5. **複雜查詢封裝**：建立 Custom Repository，放在業務模組內
+6. **Transaction 集中管理**：用 `TransactionService`，不要散落各處
 
 ---
 
@@ -307,9 +488,9 @@ const short = truncate('Long text', 10);
 2. BotUpdate 接收 (bot.on(message('text')))
    ↓
 3. BotService.handleTextMessage()
-   ├─→ DatabaseService.getUserHistory()    # 基礎設施層
+   ├─→ Repository<TelegramLog>.find()      # 查詢歷史
    ├─→ AiService.chat()                    # 整合層
-   ├─→ DatabaseService.saveMessage()       # 基礎設施層
+   ├─→ Repository<TelegramLog>.save()      # 儲存訊息
    └─→ TelegramService.sendMessage()       # 整合層
 ```
 
@@ -329,10 +510,34 @@ export class BotUpdate implements OnModuleInit {
 
 // modules/bot/bot.service.ts
 async handlePrivateText(chatId: number, text: string) {
-  const history = await this.databaseService.getUserHistory(chatId);
+  // 查詢歷史訊息
+  const history = await this.telegramLogRepo.find({
+    where: { chatId },
+    order: { createdAt: 'DESC' },
+    take: 10,
+  });
+
+  // 調用 AI
   const response = await this.aiService.chat(text, history);
-  await this.databaseService.saveMessage(chatId, text, response);
+
+  // 儲存訊息
+  await this.telegramLogRepo.save({
+    chatId,
+    content: text,
+    direction: 'incoming',
+    chatType: 'private',
+  });
+
+  // 發送回覆
   await this.telegramService.sendMessage(chatId, response);
+
+  // 儲存回覆
+  await this.telegramLogRepo.save({
+    chatId,
+    content: response,
+    direction: 'outgoing',
+    chatType: 'private',
+  });
 }
 ```
 
