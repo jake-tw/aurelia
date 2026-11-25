@@ -16,6 +16,15 @@ export default () => ({
   // Telegram Bot
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    whitelistPrivate: process.env.TELEGRAM_WHITELIST_PRIVATE
+      ? process.env.TELEGRAM_WHITELIST_PRIVATE.split(',').map((id) => parseInt(id.trim(), 10))
+      : [],
+    whitelistGroup: process.env.TELEGRAM_WHITELIST_GROUP
+      ? process.env.TELEGRAM_WHITELIST_GROUP.split(',').map((id) => parseInt(id.trim(), 10))
+      : [],
+    whitelistGroupMember: process.env.TELEGRAM_WHITELIST_GROUP_MEMBER
+      ? process.env.TELEGRAM_WHITELIST_GROUP_MEMBER.split(',').map((id) => parseInt(id.trim(), 10))
+      : [],
   },
 
   // Worker Configuration

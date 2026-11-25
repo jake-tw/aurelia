@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { BotService } from './bot.service.js';
@@ -12,20 +13,103 @@ import { BotService } from './bot.service.js';
 @Injectable()
 export class BotUpdate implements OnModuleInit {
   private readonly logger = new Logger(BotUpdate.name);
+  private readonly whitelistPrivate: number[];
+  private readonly whitelistGroup: number[];
+  private readonly whitelistGroupMember: number[];
 
   constructor(
     private readonly bot: Telegraf,
     private readonly botService: BotService,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    this.whitelistPrivate = this.config.get<number[]>('telegram.whitelistPrivate', []);
+    this.whitelistGroup = this.config.get<number[]>('telegram.whitelistGroup', []);
+    this.whitelistGroupMember = this.config.get<number[]>('telegram.whitelistGroupMember', []);
+  }
+
+  /**
+   * 檢查聊天是否在白名單中
+   */
+  private isWhitelisted(chatId: number, chatType: string, userId?: number): boolean {
+    // 私聊檢查
+    if (chatType === 'private') {
+      // 白名單為空表示允許所有私聊
+      if (this.whitelistPrivate.length === 0) {
+        return true;
+      }
+      return this.whitelistPrivate.includes(chatId);
+    }
+
+    // 群組檢查
+    if (chatType === 'group' || chatType === 'supergroup') {
+      // 兩個白名單都為空表示允許所有群組的所有成員
+      if (this.whitelistGroup.length === 0 && this.whitelistGroupMember.length === 0) {
+        return true;
+      }
+
+      // 群組白名單為空但成員白名單有設定，表示不限制群組但限制成員
+      if (this.whitelistGroup.length === 0 && this.whitelistGroupMember.length > 0) {
+        if (userId !== undefined) {
+          return this.whitelistGroupMember.includes(userId);
+        }
+        // 沒有 userId 資訊時拒絕
+        return false;
+      }
+
+      // 群組白名單有設定，先檢查群組
+      if (!this.whitelistGroup.includes(chatId)) {
+        return false;
+      }
+
+      // 群組在白名單中，檢查成員白名單
+      // 成員白名單為空表示允許該群組的所有成員
+      if (this.whitelistGroupMember.length === 0) {
+        return true;
+      }
+
+      // 檢查發送者是否在成員白名單中
+      if (userId !== undefined) {
+        return this.whitelistGroupMember.includes(userId);
+      }
+
+      // 沒有 userId 資訊時拒絕（不應該發生）
+      return false;
+    }
+
+    // 其他類型（如 channel）一律拒絕
+    return false;
+  }
 
   onModuleInit(): void {
-    this.bot.start((ctx) =>
-      this.botService.handleStart(ctx.chat.id, ctx.from?.username),
-    );
-    this.bot.command('help', (ctx) => this.botService.handleHelp(ctx.chat.id));
-    this.bot.command('status', (ctx) =>
-      this.botService.handleStatus(ctx.chat.id),
-    );
+    this.bot.start((ctx) => {
+      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type)) {
+        this.logger.warn(
+          `Rejected /start from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}`,
+        );
+        return;
+      }
+      return this.botService.handleStart(ctx.chat.id, ctx.from?.username);
+    });
+
+    this.bot.command('help', (ctx) => {
+      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type)) {
+        this.logger.warn(
+          `Rejected /help from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}`,
+        );
+        return;
+      }
+      return this.botService.handleHelp(ctx.chat.id);
+    });
+
+    this.bot.command('status', (ctx) => {
+      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type)) {
+        this.logger.warn(
+          `Rejected /status from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}`,
+        );
+        return;
+      }
+      return this.botService.handleStatus(ctx.chat.id);
+    });
 
     // 指令 handler 已先註冊，命中的指令不會走到這裡
     this.bot.on(message('text'), (ctx) => {
@@ -37,6 +121,16 @@ export class BotUpdate implements OnModuleInit {
       const chatId = ctx.chat.id;
       const chatType: string = ctx.chat.type;
       const text = ctx.message.text;
+      const userId = ctx.from?.id;
+
+      // 白名單檢查
+      if (!this.isWhitelisted(chatId, chatType, userId)) {
+        this.logger.warn(
+          `Rejected message from non-whitelisted ${chatType} chat ${chatId}` +
+          (userId ? ` (user ${userId})` : ''),
+        );
+        return;
+      }
 
       switch (chatType) {
         case 'private':

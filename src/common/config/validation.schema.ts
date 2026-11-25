@@ -15,6 +15,9 @@ export const validationSchema = Joi.object({
 
   // Telegram
   TELEGRAM_BOT_TOKEN: Joi.string().required(),
+  TELEGRAM_WHITELIST_PRIVATE: Joi.string().optional().allow(''),
+  TELEGRAM_WHITELIST_GROUP: Joi.string().optional().allow(''),
+  TELEGRAM_WHITELIST_GROUP_MEMBER: Joi.string().optional().allow(''),
 
   // Worker
   MAX_CONCURRENT_QUERY_JOBS: Joi.number().default(3),
