@@ -63,7 +63,7 @@ describe('BotUpdate', () => {
 
   const textCtx = (chatType: string, text: string, entities?: unknown[], userId?: number) => ({
     chat: { id: 42, type: chatType },
-    message: { text, entities },
+    message: { message_id: 100, text, entities },
     from: userId !== undefined ? { id: userId } : undefined,
   });
 
@@ -73,6 +73,7 @@ describe('BotUpdate', () => {
     return {
       chat: { id: 42, type: 'group' },
       message: {
+        message_id: 100,
         text: hasMention ? '@test_bot ' + text : text,
         entities,
         reply_to_message: undefined,
@@ -100,7 +101,7 @@ describe('BotUpdate', () => {
 
   it('私聊文字走 handlePrivateText', () => {
     onText(textCtx('private', 'hello'));
-    expect(service.handlePrivateText).toHaveBeenCalledWith(42, 'hello');
+    expect(service.handlePrivateText).toHaveBeenCalledWith(42, 100, 'hello');
     expect(service.handleGroupText).not.toHaveBeenCalled();
   });
 
@@ -108,12 +109,13 @@ describe('BotUpdate', () => {
     onText({
       chat: { id: 42, type },
       message: {
+        message_id: 100,
         text: '@test_bot hello',
         entities: [{ type: 'mention', offset: 0, length: 9 }],
       },
       from: { id: 123 },
     });
-    expect(service.handleGroupText).toHaveBeenCalledWith(42, '@test_bot hello');
+    expect(service.handleGroupText).toHaveBeenCalledWith(42, 100, '@test_bot hello');
     expect(service.handlePrivateText).not.toHaveBeenCalled();
   });
 
@@ -130,7 +132,7 @@ describe('BotUpdate', () => {
 
   it('句中出現指令字樣的一般文字仍 echo', () => {
     onText(textCtx('private', 'try /foo', [{ type: 'bot_command', offset: 4, length: 4 }]));
-    expect(service.handlePrivateText).toHaveBeenCalledWith(42, 'try /foo');
+    expect(service.handlePrivateText).toHaveBeenCalledWith(42, 100, 'try /foo');
   });
 
   describe('白名單功能', () => {
@@ -143,7 +145,7 @@ describe('BotUpdate', () => {
     it('白名單為空時允許所有群組', () => {
       createBotUpdate([], []);
       onText(groupTextCtx('hello', 123));
-      expect(service.handleGroupText).toHaveBeenCalledWith(42, '@test_bot hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(42, 100, '@test_bot hello');
     });
 
     it('私聊白名單：允許列表中的用戶', () => {
@@ -163,12 +165,13 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -1001234567890, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 123 },
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, '@test_bot hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, 100, '@test_bot hello');
     });
 
     it('群組白名單：拒絕不在列表中的群組', () => {
@@ -176,6 +179,7 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -999, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
@@ -200,18 +204,20 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -1001234567890, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hi',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 123 },
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, '@test_bot hi');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, 100, '@test_bot hi');
 
       // 群組：拒絕 -999
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -999, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hi',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
@@ -241,12 +247,13 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -1001234567890, type: 'supergroup' },
         message: {
+          message_id: 100,
           text: '@test_bot test',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 123 },
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, '@test_bot test');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, 100, '@test_bot test');
     });
   });
 
@@ -256,12 +263,13 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -100, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 999 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-100, '@test_bot hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-100, 100, '@test_bot hello');
     });
 
     it('成員白名單有值時僅允許列表中的成員', () => {
@@ -271,18 +279,20 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -100, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-100, '@test_bot hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-100, 100, '@test_bot hello');
 
       // 拒絕的成員
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -100, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
@@ -298,6 +308,7 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -200, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
@@ -313,18 +324,20 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -999, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-999, '@test_bot hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-999, 100, '@test_bot hello');
 
       // 成員 999 不在白名單中，拒絕
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -999, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
@@ -337,12 +350,13 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -888, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hi',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-888, '@test_bot hi');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-888, 100, '@test_bot hi');
     });
 
     it('群組和成員都設定白名單時，兩者都需要匹配', () => {
@@ -352,18 +366,20 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -100, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot msg1',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-100, '@test_bot msg1');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-100, 100, '@test_bot msg1');
 
       // 群組 -100 + 成員 999：拒絕
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -100, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot msg2',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
@@ -375,6 +391,7 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -300, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot msg3',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         },
@@ -389,6 +406,7 @@ describe('BotUpdate', () => {
       onText({
         chat: { id: -100, type: 'group' },
         message: {
+          message_id: 100,
           text: '@test_bot hello',
           entities: [{ type: 'mention', offset: 0, length: 9 }],
         }

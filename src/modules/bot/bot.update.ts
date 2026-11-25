@@ -139,7 +139,7 @@ export class BotUpdate implements OnModuleInit {
 
       switch (chatType) {
         case 'private':
-          return this.botService.handlePrivateText(chatId, text);
+          return this.botService.handlePrivateText(chatId, ctx.message.message_id, text);
         case 'group':
         case 'supergroup': {
           // 群組中只在以下情況回應：
@@ -159,7 +159,7 @@ export class BotUpdate implements OnModuleInit {
             return;
           }
 
-          return this.botService.handleGroupText(chatId, text);
+          return this.botService.handleGroupText(chatId, ctx.message.message_id, text);
         }
         default:
           // channel 等其他類型忽略

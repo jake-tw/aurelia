@@ -25,25 +25,25 @@ export class BotService {
    *
    * 目前只是 echo，用來驗證收發流程。之後私聊會接上 AI 對話。
    */
-  async handlePrivateText(chatId: number, text: string): Promise<void> {
+  async handlePrivateText(chatId: number, messageId: number, text: string): Promise<void> {
     this.logger.log(`Private chat ${chatId} sent: ${text}`);
 
     // 記錄收到的訊息
     await this.telegramLogRepo.save({
       chatId,
-      messageId: undefined,
+      messageId,
       content: text,
       direction: 'incoming',
       chatType: 'private',
     });
 
     // Echo 回覆
-    await this.telegramService.sendMessage(chatId, text);
+    const sentMessage = await this.telegramService.sendMessage(chatId, text);
 
     // 記錄發送的訊息
     await this.telegramLogRepo.save({
       chatId,
-      messageId: undefined,
+      messageId: sentMessage.message_id,
       content: text,
       direction: 'outgoing',
       chatType: 'private',
@@ -56,25 +56,25 @@ export class BotService {
    *
    * 目前只是 echo，之後會與私聊各自演進。
    */
-  async handleGroupText(chatId: number, text: string): Promise<void> {
+  async handleGroupText(chatId: number, messageId: number, text: string): Promise<void> {
     this.logger.log(`Group chat ${chatId} sent: ${text}`);
 
     // 記錄收到的訊息
     await this.telegramLogRepo.save({
       chatId,
-      messageId: undefined,
+      messageId,
       content: text,
       direction: 'incoming',
       chatType: 'group',
     });
 
     // Echo 回覆
-    await this.telegramService.sendMessage(chatId, text);
+    const sentMessage = await this.telegramService.sendMessage(chatId, text);
 
     // 記錄發送的訊息
     await this.telegramLogRepo.save({
       chatId,
-      messageId: undefined,
+      messageId: sentMessage.message_id,
       content: text,
       direction: 'outgoing',
       chatType: 'group',
