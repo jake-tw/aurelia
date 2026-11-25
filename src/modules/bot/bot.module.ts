@@ -15,4 +15,4 @@ import { DatabaseModule } from '../../infrastructure/database/database.module.js
   providers: [BotService, BotCommand, BotUpdate],
   exports: [BotService],
 })
-export class BotModule {}
+export class BotModule { }

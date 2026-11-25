@@ -13,7 +13,7 @@ describe('TelegrafLifecycle', () => {
   beforeEach(() => {
     bot = {
       catch: vi.fn(),
-      launch: vi.fn().mockReturnValue(new Promise(() => {})), // 與真實 launch 一樣一直 pending
+      launch: vi.fn().mockReturnValue(new Promise(() => { })), // 與真實 launch 一樣一直 pending
       stop: vi.fn(),
       telegram: { getMe: vi.fn().mockResolvedValue({ username: 'real_bot' }) },
     };

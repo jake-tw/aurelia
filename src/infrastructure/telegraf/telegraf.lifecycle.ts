@@ -8,12 +8,11 @@ import { Telegraf } from 'telegraf';
 
 @Injectable()
 export class TelegrafLifecycle
-  implements OnApplicationBootstrap, OnApplicationShutdown
-{
+  implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger(TelegrafLifecycle.name);
   private launched = false;
 
-  constructor(private readonly bot: Telegraf) {}
+  constructor(private readonly bot: Telegraf) { }
 
   async onApplicationBootstrap(): Promise<void> {
     // handler 內的例外只記 log，不讓 polling 中斷

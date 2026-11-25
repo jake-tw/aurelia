@@ -17,7 +17,7 @@ export class BotService {
     @InjectRepository(TelegramLog)
     private telegramLogRepo: Repository<TelegramLog>,
     private telegramService: TelegramService,
-  ) {}
+  ) { }
 
 
   /**

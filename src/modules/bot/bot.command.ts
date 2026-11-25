@@ -17,7 +17,7 @@ export class BotCommand {
     @InjectRepository(TelegramLog)
     private telegramLogRepo: Repository<TelegramLog>,
     private telegramService: TelegramService,
-  ) {}
+  ) { }
 
   /**
    * 處理 /start 指令

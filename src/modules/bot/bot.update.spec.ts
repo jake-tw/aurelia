@@ -2,6 +2,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { Telegraf } from 'telegraf';
 import { BotUpdate } from './bot.update.js';
 import type { BotService } from './bot.service.js';
+import type { BotCommand } from './bot.command.js';
 
 type Handler = (ctx: unknown) => unknown;
 
@@ -10,11 +11,13 @@ describe('BotUpdate', () => {
   let commands: Record<string, Handler>;
   let onText: Handler;
   let service: {
+    handlePrivateText: ReturnType<typeof vi.fn>;
+    handleGroupText: ReturnType<typeof vi.fn>;
+  };
+  let command: {
     handleStart: ReturnType<typeof vi.fn>;
     handleHelp: ReturnType<typeof vi.fn>;
     handleStatus: ReturnType<typeof vi.fn>;
-    handlePrivateText: ReturnType<typeof vi.fn>;
-    handleGroupText: ReturnType<typeof vi.fn>;
   };
 
   const createBotUpdate = (
@@ -27,13 +30,16 @@ describe('BotUpdate', () => {
       start: vi.fn((h: Handler) => (start = h)),
       command: vi.fn((name: string, h: Handler) => (commands[name] = h)),
       on: vi.fn((_filter: unknown, h: Handler) => (onText = h)),
+      botInfo: { id: 999, username: 'test_bot' },
     };
     service = {
+      handlePrivateText: vi.fn(),
+      handleGroupText: vi.fn(),
+    };
+    command = {
       handleStart: vi.fn(),
       handleHelp: vi.fn(),
       handleStatus: vi.fn(),
-      handlePrivateText: vi.fn(),
-      handleGroupText: vi.fn(),
     };
     const config = {
       get: vi.fn((key: string, defaultValue?: unknown) => {
@@ -46,6 +52,7 @@ describe('BotUpdate', () => {
     new BotUpdate(
       bot as unknown as Telegraf,
       service as unknown as BotService,
+      command as unknown as BotCommand,
       config as unknown as ConfigService,
     ).onModuleInit();
   };
@@ -60,21 +67,35 @@ describe('BotUpdate', () => {
     from: userId !== undefined ? { id: userId } : undefined,
   });
 
+  // 建立群組訊息 context，預設包含 mention bot
+  const groupTextCtx = (text: string, userId?: number, hasMention = true) => {
+    const entities = hasMention ? [{ type: 'mention', offset: 0, length: 9 }] : undefined;
+    return {
+      chat: { id: 42, type: 'group' },
+      message: {
+        text: hasMention ? '@test_bot ' + text : text,
+        entities,
+        reply_to_message: undefined,
+      },
+      from: userId !== undefined ? { id: userId } : undefined,
+    };
+  };
+
   it('/start 傳入 chatId 與 username', () => {
-    start({ chat: { id: 1, type: 'private' }, from: { username: 'jake' } });
-    expect(service.handleStart).toHaveBeenCalledWith(1, 'jake');
+    start({ chat: { id: 1, type: 'private' }, from: { id: 123, username: 'jake' } });
+    expect(command.handleStart).toHaveBeenCalledWith(1, 'jake');
   });
 
   it('/start 沒有 from 時 username 為 undefined', () => {
     start({ chat: { id: 1, type: 'private' } });
-    expect(service.handleStart).toHaveBeenCalledWith(1, undefined);
+    expect(command.handleStart).toHaveBeenCalledWith(1, undefined);
   });
 
-  it('/help 與 /status 轉給 BotService', () => {
-    commands.help({ chat: { id: 2, type: 'private' } });
-    commands.status({ chat: { id: 3, type: 'private' } });
-    expect(service.handleHelp).toHaveBeenCalledWith(2);
-    expect(service.handleStatus).toHaveBeenCalledWith(3);
+  it('/help 與 /status 轉給 BotCommand', () => {
+    commands.help({ chat: { id: 2, type: 'private' }, from: { id: 123 } });
+    commands.status({ chat: { id: 3, type: 'private' }, from: { id: 123 } });
+    expect(command.handleHelp).toHaveBeenCalledWith(2);
+    expect(command.handleStatus).toHaveBeenCalledWith(3);
   });
 
   it('私聊文字走 handlePrivateText', () => {
@@ -83,9 +104,16 @@ describe('BotUpdate', () => {
     expect(service.handleGroupText).not.toHaveBeenCalled();
   });
 
-  it.each(['group', 'supergroup'])('%s 文字走 handleGroupText', (type) => {
-    onText(textCtx(type, 'hello'));
-    expect(service.handleGroupText).toHaveBeenCalledWith(42, 'hello');
+  it.each(['group', 'supergroup'])('%s 文字在 mention bot 時走 handleGroupText', (type) => {
+    onText({
+      chat: { id: 42, type },
+      message: {
+        text: '@test_bot hello',
+        entities: [{ type: 'mention', offset: 0, length: 9 }],
+      },
+      from: { id: 123 },
+    });
+    expect(service.handleGroupText).toHaveBeenCalledWith(42, '@test_bot hello');
     expect(service.handlePrivateText).not.toHaveBeenCalled();
   });
 
@@ -108,37 +136,51 @@ describe('BotUpdate', () => {
   describe('白名單功能', () => {
     it('白名單為空時允許所有私聊', () => {
       createBotUpdate([], []);
-      start({ chat: { id: 999, type: 'private' }, from: { username: 'anyone' } });
-      expect(service.handleStart).toHaveBeenCalledWith(999, 'anyone');
+      start({ chat: { id: 999, type: 'private' }, from: { id: 999, username: 'anyone' } });
+      expect(command.handleStart).toHaveBeenCalledWith(999, 'anyone');
     });
 
     it('白名單為空時允許所有群組', () => {
       createBotUpdate([], []);
-      onText(textCtx('group', 'hello'));
-      expect(service.handleGroupText).toHaveBeenCalledWith(42, 'hello');
+      onText(groupTextCtx('hello', 123));
+      expect(service.handleGroupText).toHaveBeenCalledWith(42, '@test_bot hello');
     });
 
     it('私聊白名單：允許列表中的用戶', () => {
       createBotUpdate([123, 456], []);
-      start({ chat: { id: 123, type: 'private' }, from: { username: 'alice' } });
-      expect(service.handleStart).toHaveBeenCalledWith(123, 'alice');
+      start({ chat: { id: 123, type: 'private' }, from: { id: 123, username: 'alice' } });
+      expect(command.handleStart).toHaveBeenCalledWith(123, 'alice');
     });
 
     it('私聊白名單：拒絕不在列表中的用戶', () => {
       createBotUpdate([123, 456], []);
-      start({ chat: { id: 999, type: 'private' }, from: { username: 'bob' } });
-      expect(service.handleStart).not.toHaveBeenCalled();
+      start({ chat: { id: 999, type: 'private' }, from: { id: 999, username: 'bob' } });
+      expect(command.handleStart).not.toHaveBeenCalled();
     });
 
     it('群組白名單：允許列表中的群組', () => {
       createBotUpdate([], [-1001234567890]);
-      onText({ chat: { id: -1001234567890, type: 'group' }, message: { text: 'hello' } });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, 'hello');
+      onText({
+        chat: { id: -1001234567890, type: 'group' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
+        from: { id: 123 },
+      });
+      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, '@test_bot hello');
     });
 
     it('群組白名單：拒絕不在列表中的群組', () => {
       createBotUpdate([], [-1001234567890]);
-      onText({ chat: { id: -999, type: 'group' }, message: { text: 'hello' } });
+      onText({
+        chat: { id: -999, type: 'group' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
+        from: { id: 123 },
+      });
       expect(service.handleGroupText).not.toHaveBeenCalled();
     });
 
@@ -146,21 +188,35 @@ describe('BotUpdate', () => {
       createBotUpdate([123], [-1001234567890]);
 
       // 私聊：允許 123
-      start({ chat: { id: 123, type: 'private' } });
-      expect(service.handleStart).toHaveBeenCalledWith(123, undefined);
+      start({ chat: { id: 123, type: 'private' }, from: { id: 123 } });
+      expect(command.handleStart).toHaveBeenCalledWith(123, undefined);
 
       // 私聊：拒絕 999
-      service.handleStart.mockClear();
-      start({ chat: { id: 999, type: 'private' } });
-      expect(service.handleStart).not.toHaveBeenCalled();
+      command.handleStart.mockClear();
+      start({ chat: { id: 999, type: 'private' }, from: { id: 999 } });
+      expect(command.handleStart).not.toHaveBeenCalled();
 
       // 群組：允許 -1001234567890
-      onText({ chat: { id: -1001234567890, type: 'group' }, message: { text: 'hi' } });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, 'hi');
+      onText({
+        chat: { id: -1001234567890, type: 'group' },
+        message: {
+          text: '@test_bot hi',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
+        from: { id: 123 },
+      });
+      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, '@test_bot hi');
 
       // 群組：拒絕 -999
       service.handleGroupText.mockClear();
-      onText({ chat: { id: -999, type: 'group' }, message: { text: 'hi' } });
+      onText({
+        chat: { id: -999, type: 'group' },
+        message: {
+          text: '@test_bot hi',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
+        from: { id: 123 },
+      });
       expect(service.handleGroupText).not.toHaveBeenCalled();
     });
 
@@ -168,22 +224,29 @@ describe('BotUpdate', () => {
       createBotUpdate([100], []);
 
       // 允許的用戶
-      commands.help({ chat: { id: 100, type: 'private' } });
-      expect(service.handleHelp).toHaveBeenCalledWith(100);
+      commands.help({ chat: { id: 100, type: 'private' }, from: { id: 100 } });
+      expect(command.handleHelp).toHaveBeenCalledWith(100);
 
       // 拒絕的用戶
-      service.handleHelp.mockClear();
-      commands.help({ chat: { id: 200, type: 'private' } });
-      expect(service.handleHelp).not.toHaveBeenCalled();
+      command.handleHelp.mockClear();
+      commands.help({ chat: { id: 200, type: 'private' }, from: { id: 200 } });
+      expect(command.handleHelp).not.toHaveBeenCalled();
 
-      commands.status({ chat: { id: 200, type: 'private' } });
-      expect(service.handleStatus).not.toHaveBeenCalled();
+      commands.status({ chat: { id: 200, type: 'private' }, from: { id: 200 } });
+      expect(command.handleStatus).not.toHaveBeenCalled();
     });
 
     it('supergroup 也使用群組白名單', () => {
       createBotUpdate([], [-1001234567890]);
-      onText({ chat: { id: -1001234567890, type: 'supergroup' }, message: { text: 'test' } });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, 'test');
+      onText({
+        chat: { id: -1001234567890, type: 'supergroup' },
+        message: {
+          text: '@test_bot test',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
+        from: { id: 123 },
+      });
+      expect(service.handleGroupText).toHaveBeenCalledWith(-1001234567890, '@test_bot test');
     });
   });
 
@@ -192,10 +255,13 @@ describe('BotUpdate', () => {
       createBotUpdate([], [-100], []);
       onText({
         chat: { id: -100, type: 'group' },
-        message: { text: 'hello' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 999 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-100, 'hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-100, '@test_bot hello');
     });
 
     it('成員白名單有值時僅允許列表中的成員', () => {
@@ -204,16 +270,22 @@ describe('BotUpdate', () => {
       // 允許的成員
       onText({
         chat: { id: -100, type: 'group' },
-        message: { text: 'hello' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-100, 'hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-100, '@test_bot hello');
 
       // 拒絕的成員
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -100, type: 'group' },
-        message: { text: 'hello' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 999 }
       });
       expect(service.handleGroupText).not.toHaveBeenCalled();
@@ -225,7 +297,10 @@ describe('BotUpdate', () => {
       // 群組 -200 不在白名單中，即使成員 111 在成員白名單中也拒絕
       onText({
         chat: { id: -200, type: 'group' },
-        message: { text: 'hello' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 111 }
       });
       expect(service.handleGroupText).not.toHaveBeenCalled();
@@ -237,16 +312,22 @@ describe('BotUpdate', () => {
       // 成員 111 在白名單中，允許
       onText({
         chat: { id: -999, type: 'group' },
-        message: { text: 'hello' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-999, 'hello');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-999, '@test_bot hello');
 
       // 成員 999 不在白名單中，拒絕
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -999, type: 'group' },
-        message: { text: 'hello' },
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 999 }
       });
       expect(service.handleGroupText).not.toHaveBeenCalled();
@@ -255,10 +336,13 @@ describe('BotUpdate', () => {
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -888, type: 'group' },
-        message: { text: 'hi' },
+        message: {
+          text: '@test_bot hi',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-888, 'hi');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-888, '@test_bot hi');
     });
 
     it('群組和成員都設定白名單時，兩者都需要匹配', () => {
@@ -267,16 +351,22 @@ describe('BotUpdate', () => {
       // 群組 -100 + 成員 111：允許
       onText({
         chat: { id: -100, type: 'group' },
-        message: { text: 'msg1' },
+        message: {
+          text: '@test_bot msg1',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 111 }
       });
-      expect(service.handleGroupText).toHaveBeenCalledWith(-100, 'msg1');
+      expect(service.handleGroupText).toHaveBeenCalledWith(-100, '@test_bot msg1');
 
       // 群組 -100 + 成員 999：拒絕
       service.handleGroupText.mockClear();
       onText({
         chat: { id: -100, type: 'group' },
-        message: { text: 'msg2' },
+        message: {
+          text: '@test_bot msg2',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 999 }
       });
       expect(service.handleGroupText).not.toHaveBeenCalled();
@@ -284,7 +374,10 @@ describe('BotUpdate', () => {
       // 群組 -300 + 成員 111：拒絕（群組不在白名單）
       onText({
         chat: { id: -300, type: 'group' },
-        message: { text: 'msg3' },
+        message: {
+          text: '@test_bot msg3',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        },
         from: { id: 111 }
       });
       expect(service.handleGroupText).not.toHaveBeenCalled();
@@ -295,7 +388,10 @@ describe('BotUpdate', () => {
 
       onText({
         chat: { id: -100, type: 'group' },
-        message: { text: 'hello' }
+        message: {
+          text: '@test_bot hello',
+          entities: [{ type: 'mention', offset: 0, length: 9 }],
+        }
         // 沒有 from 欄位
       });
       expect(service.handleGroupText).not.toHaveBeenCalled();

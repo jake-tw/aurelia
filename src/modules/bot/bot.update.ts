@@ -84,9 +84,10 @@ export class BotUpdate implements OnModuleInit {
 
   onModuleInit(): void {
     this.bot.start((ctx) => {
-      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type)) {
+      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type, ctx.from?.id)) {
         this.logger.warn(
-          `Rejected /start from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}`,
+          `Rejected /start from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}` +
+          (ctx.from?.id ? ` (user ${ctx.from.id})` : ''),
         );
         return;
       }
@@ -94,9 +95,10 @@ export class BotUpdate implements OnModuleInit {
     });
 
     this.bot.command('help', (ctx) => {
-      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type)) {
+      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type, ctx.from?.id)) {
         this.logger.warn(
-          `Rejected /help from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}`,
+          `Rejected /help from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}` +
+          (ctx.from?.id ? ` (user ${ctx.from.id})` : ''),
         );
         return;
       }
@@ -104,9 +106,10 @@ export class BotUpdate implements OnModuleInit {
     });
 
     this.bot.command('status', (ctx) => {
-      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type)) {
+      if (!this.isWhitelisted(ctx.chat.id, ctx.chat.type, ctx.from?.id)) {
         this.logger.warn(
-          `Rejected /status from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}`,
+          `Rejected /status from non-whitelisted ${ctx.chat.type} chat ${ctx.chat.id}` +
+          (ctx.from?.id ? ` (user ${ctx.from.id})` : ''),
         );
         return;
       }
@@ -145,7 +148,7 @@ export class BotUpdate implements OnModuleInit {
           const botInfo = this.bot.botInfo;
           const isMentioned = ctx.message.entities?.some(
             (e) => e.type === 'mention' &&
-            text.substring(e.offset, e.offset + e.length) === `@${botInfo?.username}`
+              text.substring(e.offset, e.offset + e.length) === `@${botInfo?.username}`
           );
           const isReplyToBot = ctx.message.reply_to_message?.from?.id === botInfo?.id;
 

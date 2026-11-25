@@ -1,12 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Telegraf } from 'telegraf';
 import type { Message, UserFromGetMe } from 'telegraf/types';
+import { TELEGRAM_COMMANDS } from './commands.config.js';
 
 @Injectable()
-export class TelegramService {
+export class TelegramService implements OnModuleInit {
   private readonly logger = new Logger(TelegramService.name);
 
-  constructor(private readonly bot: Telegraf) {}
+  constructor(private readonly bot: Telegraf) { }
+
+  /**
+   * 設定 Telegram 指令選單
+   */
+  async onModuleInit(): Promise<void> {
+    await this.bot.telegram.setMyCommands(TELEGRAM_COMMANDS);
+    this.logger.log('Telegram command list updated');
+  }
 
   /**
    * 發送文字訊息

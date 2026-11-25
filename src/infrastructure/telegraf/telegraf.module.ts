@@ -21,4 +21,4 @@ import { TelegrafLifecycle } from './telegraf.lifecycle.js';
   ],
   exports: [Telegraf],
 })
-export class TelegrafModule {}
+export class TelegrafModule { }

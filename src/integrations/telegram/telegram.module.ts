@@ -7,4 +7,4 @@ import { TelegrafModule } from '../../infrastructure/telegraf/telegraf.module.js
   providers: [TelegramService],
   exports: [TelegramService],
 })
-export class TelegramModule {}
+export class TelegramModule { }
