@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Telegraf } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { BotService } from './bot.service.js';
+import { BotCommand } from './bot.command.js';
 
 /**
  * Bot 訊息入口
@@ -20,6 +21,7 @@ export class BotUpdate implements OnModuleInit {
   constructor(
     private readonly bot: Telegraf,
     private readonly botService: BotService,
+    private readonly botCommand: BotCommand,
     private readonly config: ConfigService,
   ) {
     this.whitelistPrivate = this.config.get<number[]>('telegram.whitelistPrivate', []);
@@ -88,7 +90,7 @@ export class BotUpdate implements OnModuleInit {
         );
         return;
       }
-      return this.botService.handleStart(ctx.chat.id, ctx.from?.username);
+      return this.botCommand.handleStart(ctx.chat.id, ctx.from?.username);
     });
 
     this.bot.command('help', (ctx) => {
@@ -98,7 +100,7 @@ export class BotUpdate implements OnModuleInit {
         );
         return;
       }
-      return this.botService.handleHelp(ctx.chat.id);
+      return this.botCommand.handleHelp(ctx.chat.id);
     });
 
     this.bot.command('status', (ctx) => {
@@ -108,7 +110,7 @@ export class BotUpdate implements OnModuleInit {
         );
         return;
       }
-      return this.botService.handleStatus(ctx.chat.id);
+      return this.botCommand.handleStatus(ctx.chat.id);
     });
 
     // 指令 handler 已先註冊，命中的指令不會走到這裡
@@ -136,8 +138,26 @@ export class BotUpdate implements OnModuleInit {
         case 'private':
           return this.botService.handlePrivateText(chatId, text);
         case 'group':
-        case 'supergroup':
+        case 'supergroup': {
+          // 群組中只在以下情況回應：
+          // 1. 訊息中有 mention bot（entities 包含 mention 且文字是 bot username）
+          // 2. 訊息是回覆 bot 的訊息
+          const botInfo = this.bot.botInfo;
+          const isMentioned = ctx.message.entities?.some(
+            (e) => e.type === 'mention' &&
+            text.substring(e.offset, e.offset + e.length) === `@${botInfo?.username}`
+          );
+          const isReplyToBot = ctx.message.reply_to_message?.from?.id === botInfo?.id;
+
+          if (!isMentioned && !isReplyToBot) {
+            this.logger.debug(
+              `Ignored group message from ${chatId} (bot not mentioned or replied to)`
+            );
+            return;
+          }
+
           return this.botService.handleGroupText(chatId, text);
+        }
         default:
           // channel 等其他類型忽略
           this.logger.debug(`Ignored message from ${chatType} chat ${chatId}`);
