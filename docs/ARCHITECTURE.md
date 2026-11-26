@@ -12,10 +12,16 @@ src/
 ├── app.service.ts                   # 根服務
 │
 ├── modules/                         # 🔵 業務邏輯層（頂層）
-│   └── bot/                         # Telegram Bot 業務邏輯
-│       ├── bot.module.ts            # Bot 模組定義
-│       ├── bot.service.ts           # Bot 業務邏輯（處理指令與文字訊息）
-│       └── bot.update.ts            # Bot 訊息入口（註冊 handler、依聊天類型分流）
+│   ├── bot/                         # Telegram Bot 業務邏輯
+│   │   ├── bot.module.ts            # Bot 模組定義
+│   │   ├── bot.service.ts           # Bot 業務邏輯（處理指令與文字訊息）
+│   │   └── bot.update.ts            # Bot 訊息入口（註冊 handler、依聊天類型分流）
+│   └── tasks/                       # 定時任務業務邏輯
+│       ├── tasks.module.ts          # Tasks 模組定義
+│       ├── tasks.service.ts         # 定時任務業務邏輯
+│       └── jobs/                    # 具體的 Job 定義
+│           ├── cleanup.job.ts       # 範例：清理過期資料
+│           └── health-check.job.ts  # 範例：健康檢查
 │
 ├── integrations/                    # 🟢 外部服務整合層（中層）
 │   └── telegram/                    # Telegram API 封裝
@@ -26,9 +32,12 @@ src/
 │   ├── telegraf/                    # Telegraf 實例與生命週期
 │   │   ├── telegraf.module.ts       # 提供唯一的 Telegraf 實例
 │   │   └── telegraf.lifecycle.ts    # 啟動（polling）與關閉
-│   └── database/                    # 資料庫連接
-│       ├── database.module.ts       # 資料庫模組
-│       └── database.service.ts      # 資料庫操作
+│   ├── database/                    # 資料庫連接
+│   │   ├── database.module.ts       # 資料庫模組
+│   │   └── database.service.ts      # 資料庫操作
+│   └── scheduler/                   # 定時任務調度器
+│       ├── scheduler.module.ts      # Scheduler 模組
+│       └── scheduler.service.ts     # 動態註冊/取消定時任務
 │
 └── common/                          # ⚪ 共用工具層（無狀態）
     ├── config/                      # 配置管理
@@ -151,7 +160,7 @@ export class TelegramService {
 - `telegram/` - Telegram Bot API
 - `ai/` - Anthropic Claude API
 - `shell/` - Shell 命令執行
-- `claude-code/` - Claude Code CLI
+- `claude/` - Claude Code CLI
 
 ### infrastructure/ - 基礎設施層
 
@@ -174,6 +183,7 @@ export class TransactionService {
 
 **典型模組：**
 - `database/` - Entity 定義、Transaction 管理
+- `scheduler/` - 定時任務調度器（封裝 `@nestjs/schedule`）
 - `cache/` - 快取服務
 - `queue/` - 訊息佇列
 
@@ -543,7 +553,48 @@ async handlePrivateText(chatId: number, text: string) {
 
 ---
 
+## ⏰ 定時任務模組設計
+
+### 分層原則
+
+```
+modules/tasks/           # 業務邏輯層：定義具體任務內容
+  ↓ 依賴
+infrastructure/scheduler/  # 基礎設施層：提供調度能力（封裝 @nestjs/schedule）
+```
+
+**職責劃分：**
+- `infrastructure/scheduler/`：只負責「何時執行」，不包含業務邏輯，完全可複用
+- `modules/tasks/`：定義「要做什麼」，可依賴其他業務模組、整合層、基礎設施層
+
+### 兩種實作方式
+
+#### 1. 靜態任務（@Cron 裝飾器）
+
+**適用場景：** 系統級固定任務（清理、健康檢查），Cron 表達式固定，所有用戶共用
+
+**關鍵：** 使用 `@Cron` 裝飾器，明確指定 `timeZone: 'Asia/Taipei'`
+
+#### 2. 動態任務（SchedulerService API）
+
+**適用場景：** 用戶自訂任務（每個用戶不同），Cron 表達式儲存在資料庫，需要動態新增/移除
+
+**關鍵實作：**
+- 動態任務必須持久化到資料庫
+- 在 `onModuleInit` 中從資料庫載入並重新註冊所有任務
+- 任務命名使用有意義的前綴（如 `reminder-${id}`）
+
+### 注意事項
+
+1. **長時間執行的任務**：使用鎖機制防止任務堆疊，或將長任務改用 Queue（如 Bull）
+2. **分散式環境**：多實例會重複執行任務，需使用分散式鎖（Redis）或外部排程器（Kubernetes CronJob）
+3. **錯誤處理**：任務內的錯誤不會中斷應用程式，但應該記錄並發送告警
+4. **日誌記錄**：所有任務必須使用 `Logger` 記錄執行狀態
+
+---
+
 ## 📚 相關文檔
 
 - [NestJS 文檔](https://docs.nestjs.com)
 - [NestJS LLM 文檔](https://docs.nestjs.com/llms.txt)
+- [NestJS Schedule 文檔](https://docs.nestjs.com/techniques/task-scheduling)
